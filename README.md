@@ -2,9 +2,9 @@
 ![Application Screenshot](screenshot.png)
 
 ## Features
-- Custom Themes 
-- Custom Icons
-- Thumbnail Previews for Images
+- Custom themes 
+- Custom icons
+- Thumbnail previews for images
 - Support for freedesktop.org themes 
 
 ## Installation
