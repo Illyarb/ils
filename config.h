@@ -14,22 +14,14 @@
 #define ICON_SIZE_64 64
 #define DEFAULT_ICON_SIZE ICON_SIZE_64
 
+typedef enum {
+    PROTOCOL_KITTY,
+    PROTOCOL_SIXEL,
+    PROTOCOL_LSD
+} GraphicsProtocol;
+
 #define ICON_BASE_PATH "/usr/share/icons"
-// #define DEFAULT_THEME "breeze-dark"
-
-// #define DEFAULT_THEME "Vortex-Dark-Icons"
-// #define DEFAULT_THEME "Hey-purple"
-// #define DEFAULT_THEME "Sweet-Purple"
-// #define DEFAULT_THEME "Sweet-folders"
-// #define DEFAULT_THEME "breeze"
-// #define DEFAULT_THEME "ubuntu-mono-dark"
-# define DEFAULT_THEME "candy-icons"
-// # define DEFAULT_THEME "Sweet-Rainbow"
-// # define DEFAULT_THEME "CRUSHED-Limes-Suru"
-// # define DEFAULT_THEME "Infinity-Dark-Icons"
-// # define DEFAULT_THEME "Adwaita"
-
-
+#define DEFAULT_THEME "Ketsa-Dark-Icons"
 
 #define CUSTOM_ICON_BASE_PATH "$HOME/.local/share/customLogos"
 #define ICON_LEMON CUSTOM_ICON_BASE_PATH "/lemon.svg"

@@ -46,5 +46,4 @@ const char* get_mimetype_for_extension(const char* extension);
 bool is_image_file(const char* filename);
 char* get_thumbnail_path(const char* filename);
 bool generate_thumbnail(const char* source_path, const char* thumbnail_path);
-
 #endif

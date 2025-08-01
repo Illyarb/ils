@@ -19,17 +19,23 @@
 
 static char CACHE_PATH[MAX_PATH_LENGTH];
 int current_icon_size = DEFAULT_ICON_SIZE;
+static GraphicsProtocol graphics_protocol = PROTOCOL_KITTY;
 
 typedef struct {
     char* name;
     const char* color;
     char* icon_path;
     char* cached_png_path;
+    char* cached_sixel_path;
     mode_t permissions;
     uid_t owner;
     size_t name_length;
     bool is_thumbnail;
 } FileEntry;
+
+static char* get_cached_sixel_path(const char* png_path);
+static bool cache_sixel(const char* png_path, const char* sixel_path);
+static void draw_cached_sixel(const char* sixel_path);
 
 static const char* get_color_code(mode_t mode) {
     if (S_ISDIR(mode)) return BLUE;
@@ -90,10 +96,34 @@ static char* get_cached_png_path(const char* svg_path) {
     return cached_path;
 }
 
+static char* get_cached_sixel_path(const char* png_path) {
+    if (!png_path) return NULL;
+    
+    char* sixel_path = malloc(strlen(png_path) + 10);
+    if (!sixel_path) return NULL;
+    
+    strcpy(sixel_path, png_path);
+    char* dot = strrchr(sixel_path, '.');
+    if (dot) {
+        strcpy(dot, ".sixel");
+    } else {
+        strcat(sixel_path, ".sixel");
+    }
+    
+    return sixel_path;
+}
+
 static bool cache_svg(const char* svg_path, const char* png_path) {
     char cmd[2048];
     snprintf(cmd, sizeof(cmd), "rsvg-convert \"%s\" -o \"%s\" --width=%d --height=%d 2>/dev/null", 
              svg_path, png_path, current_icon_size, current_icon_size);
+    return system(cmd) == 0;
+}
+
+static bool cache_sixel(const char* png_path, const char* sixel_path) {
+    char cmd[MAX_PATH_LENGTH * 2 + 100];
+    snprintf(cmd, sizeof(cmd), "convert \"%s\" -resize %dx%d sixel:\"%s\" 2>/dev/null", 
+             png_path, current_icon_size, current_icon_size, sixel_path);
     return system(cmd) == 0;
 }
 
@@ -172,10 +202,50 @@ static void cache_all_icons(FileEntry* files, int file_count) {
                 }
             }
         }
+        
+        if (graphics_protocol == PROTOCOL_SIXEL && files[i].cached_png_path && files[i].cached_sixel_path) {
+            struct stat sixel_st;
+            if (stat(files[i].cached_sixel_path, &sixel_st) != 0) {
+                cache_sixel(files[i].cached_png_path, files[i].cached_sixel_path);
+            }
+        }
     }
 }
 
-static void draw_png(int x, int y, int col, int row, const char *png_path) {
+static void detect_graphics_protocol(void) {
+    const char* term = getenv("TERM");
+    const char* term_program = getenv("TERM_PROGRAM");
+    
+    if (term_program) {
+        if (strcmp(term_program, "iTerm.app") == 0) {
+            graphics_protocol = PROTOCOL_SIXEL;
+            return;
+        }
+    }
+    
+    if (term) {
+        if (strstr(term, "st") || strstr(term, "kitty") || strstr(term, "ghostty") ||
+            strstr(term, "wezterm") || strstr(term, "xterm-kitty")) {
+            graphics_protocol = PROTOCOL_KITTY;
+            return;
+        }
+        
+        if (strstr(term, "foot") || strstr(term, "mlterm") || strstr(term, "xterm") ||
+            strstr(term, "contour")) {
+            graphics_protocol = PROTOCOL_SIXEL;
+            return;
+        }
+        
+        if (strstr(term, "alacritty")) {
+            graphics_protocol = PROTOCOL_LSD;
+            return;
+        }
+    }
+    
+    graphics_protocol = PROTOCOL_LSD;
+}
+
+static void draw_png_kitty(int x, int y, int col, int row, const char *png_path) {
     FILE *fp = fopen(png_path, "rb");
     if (!fp) {
         return;
@@ -236,12 +306,57 @@ static void draw_png(int x, int y, int col, int row, const char *png_path) {
     free(encoded);
 }
 
+static void draw_cached_sixel(const char* sixel_path) {
+    FILE* fp = fopen(sixel_path, "r");
+    if (!fp) return;
+    
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        printf("%s", buffer);
+    }
+    
+    fclose(fp);
+}
+
+static void fallback_to_lsd(void) {
+    execvp("lsd", (char*[]){ "lsd", NULL });
+    fprintf(stderr, "Failed to execute lsd. Please install lsd for better file listing.\n");
+    exit(1);
+}
+
+static void draw_image(int x, int y, int col, int row, const char *image_path, const char* sixel_path) {
+    (void)x; (void)y; (void)col; (void)row;
+    switch (graphics_protocol) {
+        case PROTOCOL_KITTY:
+            if (image_path) {
+                draw_png_kitty(x, y, col, row, image_path);
+            }
+            break;
+        case PROTOCOL_SIXEL:
+            if (sixel_path) {
+                draw_cached_sixel(sixel_path);
+            }
+            break;
+        case PROTOCOL_LSD:
+            break;
+    }
+}
+
 static void parse_arguments(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--icon-size") == 0 && i + 1 < argc) {
             int size = atoi(argv[i + 1]);
             if (size == ICON_SIZE_16 || size == ICON_SIZE_32 || size == ICON_SIZE_64) {
                 current_icon_size = size;
+            }
+            i++;
+        } else if (strcmp(argv[i], "--protocol") == 0 && i + 1 < argc) {
+            if (strcmp(argv[i + 1], "kitty") == 0) {
+                graphics_protocol = PROTOCOL_KITTY;
+            } else if (strcmp(argv[i + 1], "sixel") == 0) {
+                graphics_protocol = PROTOCOL_SIXEL;
+            } else if (strcmp(argv[i + 1], "lsd") == 0) {
+                graphics_protocol = PROTOCOL_LSD;
             }
             i++;
         }
@@ -254,6 +369,11 @@ int main(int argc, char* argv[]) {
     struct winsize w;
     
     parse_arguments(argc, argv);
+    detect_graphics_protocol();
+    
+    if (graphics_protocol == PROTOCOL_LSD) {
+        fallback_to_lsd();
+    }
     
     init_cache_path();
     init_theme(DEFAULT_THEME);
@@ -295,6 +415,7 @@ int main(int argc, char* argv[]) {
             files[file_count].permissions = st.st_mode;
             files[file_count].owner = st.st_uid;
             files[file_count].color = get_color_code(st.st_mode);
+            files[file_count].cached_sixel_path = NULL;
             
             if (is_image_file(entry->d_name)) {
                 files[file_count].icon_path = get_thumbnail_path(entry->d_name);
@@ -309,6 +430,10 @@ int main(int argc, char* argv[]) {
                 files[file_count].icon_path = get_file_logo(entry->d_name, st.st_mode, st.st_uid);
                 files[file_count].is_thumbnail = false;
                 files[file_count].cached_png_path = get_cached_png_path(files[file_count].icon_path);
+                
+                if (graphics_protocol == PROTOCOL_SIXEL && files[file_count].cached_png_path) {
+                    files[file_count].cached_sixel_path = get_cached_sixel_path(files[file_count].cached_png_path);
+                }
             }
             
             files[file_count].name_length = strlen(entry->d_name);
@@ -322,7 +447,9 @@ int main(int argc, char* argv[]) {
     }
     closedir(dir);
 
-    cache_all_icons(files, file_count);
+    if (graphics_protocol != PROTOCOL_LSD) {
+        cache_all_icons(files, file_count);
+    }
 
     size_t column_width = max_filename_length + COLUMN_PADDING;
     if (column_width < MIN_COLUMN_WIDTH) column_width = MIN_COLUMN_WIDTH;
@@ -335,13 +462,28 @@ int main(int argc, char* argv[]) {
     for (int row = 0; row < num_rows; row++) {
         for (int col = 0; col < num_columns; col++) {
             int index = col * num_rows + row;
+            
             if (index < file_count) {
-                go_up(1);
+                if (graphics_protocol != PROTOCOL_SIXEL) {
+                    go_up(1);
+                }
+                
                 if (files[index].cached_png_path) {
-                    if (ensure_png_exists(files[index].icon_path, files[index].cached_png_path, files[index].is_thumbnail)) {
-                        draw_png(0, 0, 4, 2, files[index].cached_png_path);
+                    if (graphics_protocol == PROTOCOL_SIXEL) {
+                        if (files[index].cached_sixel_path) {
+                            struct stat sixel_st;
+                            if (stat(files[index].cached_sixel_path, &sixel_st) == 0) {
+                                draw_image(0, 0, 4, 2, files[index].cached_png_path, 
+                                         files[index].cached_sixel_path);
+                            }
+                        }
+                    } else {
+                        if (ensure_png_exists(files[index].icon_path, files[index].cached_png_path, files[index].is_thumbnail)) {
+                            draw_image(0, 0, 4, 2, files[index].cached_png_path, NULL);
+                        }
                     }
                 }
+                
                 printf("%s%-*s%s", 
                        files[index].color,
                        (int)column_width, 
@@ -349,7 +491,10 @@ int main(int argc, char* argv[]) {
                        RESET);
             }
         }
-        printf("\n\n");
+        printf("\n");
+        if (graphics_protocol != PROTOCOL_SIXEL) {
+            printf("\n");
+        }
     }
 
     for (int i = 0; i < file_count; i++) {
@@ -358,7 +503,9 @@ int main(int argc, char* argv[]) {
             free(files[i].icon_path);
         }
         free(files[i].cached_png_path);
+        free(files[i].cached_sixel_path);
     }
     free(files);
     cleanup_theme();
     return 0;
+}
