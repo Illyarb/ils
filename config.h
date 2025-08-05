@@ -21,14 +21,7 @@ typedef enum {
 } GraphicsProtocol;
 
 #define ICON_BASE_PATH "/usr/share/icons"
-#define DEFAULT_THEME "Ketsa-Dark-Icons"
-
-#define CUSTOM_ICON_BASE_PATH "$HOME/.local/share/customLogos"
-#define ICON_LEMON CUSTOM_ICON_BASE_PATH "/lemon.svg"
-#define ICON_SENTIMENTS CUSTOM_ICON_BASE_PATH "/sentiments.svg"
-#define ICON_MEMORY CUSTOM_ICON_BASE_PATH "/memory.svg"
-#define ICON_STATE CUSTOM_ICON_BASE_PATH "/state.svg"
-#define ICON_TEST CUSTOM_ICON_BASE_PATH "/test.svg"
+#define DEFAULT_THEME "Coffee"
 
 #define CACHE_DIRECTORY_PATH ".local/share/ils/icons"
 
