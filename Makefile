@@ -1,9 +1,9 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -O2
 TARGET = ils
-SOURCES = main.c logo.c
+SOURCES = main.c logo.c lsd_config.c
 OBJECTS = $(SOURCES:.c=.o)
-HEADERS = config.h logo.h
+HEADERS = config.h logo.h lsd_config.h
 
 .PHONY: all clean install uninstall
 
@@ -22,7 +22,6 @@ install: $(TARGET)
 	cp $(TARGET) /usr/local/bin/
 	chmod +x /usr/local/bin/$(TARGET)
 	rm -rf $(HOME)/.local/share/ils/icons
-
 
 uninstall:
 	rm -f /usr/local/bin/$(TARGET)

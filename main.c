@@ -10,6 +10,7 @@
 #include <pwd.h>
 #include "config.h"
 #include "logo.h"
+#include "lsd_config.h"
 
 #define move_cursor(X, Y) printf("\033[%d;%dH", Y, X)
 #define go_up(N) printf("\033[%dA", N)
@@ -31,6 +32,8 @@ typedef struct {
     uid_t owner;
     size_t name_length;
     bool is_thumbnail;
+    bool is_emoji;
+    const char* emoji_text;
 } FileEntry;
 
 static char* get_cached_sixel_path(const char* png_path);
@@ -75,6 +78,138 @@ static void init_cache_path(void) {
         home = pw->pw_dir;
     }
     snprintf(CACHE_PATH, sizeof(CACHE_PATH), "%s/%s", home, CACHE_DIRECTORY_PATH);
+}
+
+static char* get_emoji_png_path(const char* emoji_text, const char* color_hash) {
+    if (!emoji_text) return NULL;
+    
+    char safe_name[64];
+    int j = 0;
+    for (int i = 0; emoji_text[i] && j < 50; i++) {
+        if ((unsigned char)emoji_text[i] > 32) {
+            snprintf(safe_name + j, sizeof(safe_name) - j, "%02x", (unsigned char)emoji_text[i]);
+            j += 2;
+        }
+    }
+    safe_name[j] = '\0';
+    
+    unsigned int color_code = 0;
+    if (color_hash) {
+        for (int i = 0; color_hash[i]; i++) {
+            color_code = color_code * 31 + (unsigned char)color_hash[i];
+        }
+    }
+    
+    char* emoji_path = malloc(strlen(CACHE_PATH) + strlen(safe_name) + 50);
+    if (!emoji_path) return NULL;
+    
+    snprintf(emoji_path, strlen(CACHE_PATH) + strlen(safe_name) + 50, 
+             "%s/emoji_%s_%dx%d_%08x.png", CACHE_PATH, safe_name, 
+             current_icon_size, current_icon_size, color_code);
+    
+    return emoji_path;
+}
+
+static bool generate_emoji_png(const char* emoji_text, const char* png_path, const char* ansi_color) {
+    if (getenv("DEBUG_ICONS")) {
+        printf("=== Generating emoji PNG ===\n");
+        printf("Text: '%s'\n", emoji_text);
+        printf("Path: '%s'\n", png_path);
+        printf("Icon size: %d\n", current_icon_size);
+    }
+    
+    char cmd[2048];
+    char color_arg[64] = "";
+    
+    if (ansi_color) {
+        if (strcmp(ansi_color, BLUE) == 0) strcpy(color_arg, "-fill blue");
+        else if (strcmp(ansi_color, GREEN) == 0) strcpy(color_arg, "-fill green");
+        else if (strcmp(ansi_color, RED) == 0) strcpy(color_arg, "-fill red");
+        else if (strcmp(ansi_color, YELLOW) == 0) strcpy(color_arg, "-fill yellow");
+        else if (strcmp(ansi_color, MAGENTA) == 0) strcpy(color_arg, "-fill magenta");
+        else if (strcmp(ansi_color, CYAN) == 0) strcpy(color_arg, "-fill cyan");
+        else strcpy(color_arg, "-fill white");
+    } else {
+        strcpy(color_arg, "-fill white");
+    }
+    
+    int font_size = (current_icon_size * 6) / 10;
+    if (font_size < 12) font_size = 12;
+    if (font_size > current_icon_size - 4) font_size = current_icon_size - 4;
+    
+    if (getenv("DEBUG_ICONS")) {
+        printf("Calculated font size: %d\n", font_size);
+        printf("Color arg: %s\n", color_arg);
+    }
+    
+    snprintf(cmd, sizeof(cmd), 
+             "magick -size %dx%d -background transparent -pointsize %d -gravity center %s "
+             "label:'%s' '%s' 2>/dev/null",
+             current_icon_size, current_icon_size, font_size, color_arg, emoji_text, png_path);
+    
+    if (getenv("DEBUG_ICONS")) {
+        printf("Trying label approach: %s\n", cmd);
+    }
+    
+    system(cmd);
+    
+    struct stat st;
+    if (stat(png_path, &st) == 0 && st.st_size > 500) {
+        if (getenv("DEBUG_ICONS")) {
+            printf("SUCCESS with label: %ld bytes\n", st.st_size);
+        }
+        return true;
+    }
+    
+    snprintf(cmd, sizeof(cmd), 
+             "magick -size %dx%d -background transparent -gravity center "
+             "pango:'<span font=\"%d\" foreground=\"%s\">%s</span>' '%s' 2>/dev/null",
+             current_icon_size, current_icon_size, font_size, 
+             strstr(color_arg, "blue") ? "blue" : strstr(color_arg, "green") ? "green" : 
+             strstr(color_arg, "red") ? "red" : strstr(color_arg, "yellow") ? "yellow" :
+             strstr(color_arg, "magenta") ? "magenta" : strstr(color_arg, "cyan") ? "cyan" : "white",
+             emoji_text, png_path);
+    
+    if (getenv("DEBUG_ICONS")) {
+        printf("Trying pango approach: %s\n", cmd);
+    }
+    
+    system(cmd);
+    
+    if (stat(png_path, &st) == 0 && st.st_size > 500) {
+        if (getenv("DEBUG_ICONS")) {
+            printf("SUCCESS with pango: %ld bytes\n", st.st_size);
+        }
+        return true;
+    }
+    
+    const char* fonts[] = {"DejaVu-Sans", "Liberation-Sans", "Ubuntu", "Arial", "Noto-Color-Emoji", NULL};
+    
+    for (int i = 0; fonts[i]; i++) {
+        snprintf(cmd, sizeof(cmd), 
+                 "magick -size %dx%d xc:transparent -font '%s' -pointsize %d %s "
+                 "-gravity center -annotate +0+0 '%s' '%s' 2>/dev/null",
+                 current_icon_size, current_icon_size, fonts[i], font_size, color_arg, emoji_text, png_path);
+        
+        if (getenv("DEBUG_ICONS")) {
+            printf("Trying font %s: %s\n", fonts[i], cmd);
+        }
+        
+        system(cmd);
+        
+        if (stat(png_path, &st) == 0 && st.st_size > 500) {
+            if (getenv("DEBUG_ICONS")) {
+                printf("SUCCESS with %s: %ld bytes\n", fonts[i], st.st_size);
+            }
+            return true;
+        }
+    }
+    
+    if (getenv("DEBUG_ICONS")) {
+        printf("All approaches failed\n");
+    }
+    
+    return false;
 }
 
 static char* get_cached_png_path(const char* svg_path) {
@@ -184,6 +319,53 @@ static void cache_all_icons(FileEntry* files, int file_count) {
     ensure_cache_directory();
     
     for (int i = 0; i < file_count; i++) {
+        if (files[i].is_emoji) {
+            if (files[i].cached_png_path && files[i].emoji_text) {
+                struct stat st;
+                if (stat(files[i].cached_png_path, &st) != 0) {
+                    if (!generate_emoji_png(files[i].emoji_text, files[i].cached_png_path, files[i].color)) {
+                        if (getenv("DEBUG_ICONS")) {
+                            printf("Emoji failed, falling back to SVG for: %s\n", files[i].name);
+                        }
+                        files[i].is_emoji = false;
+                        free(files[i].cached_png_path);
+                        free(files[i].cached_sixel_path);
+                        
+                        if (is_image_file(files[i].name)) {
+                            files[i].icon_path = get_thumbnail_path(files[i].name);
+                            files[i].is_thumbnail = true;
+                            files[i].cached_png_path = strdup(files[i].icon_path);
+                            
+                            struct stat thumb_st;
+                            if (stat(files[i].icon_path, &thumb_st) != 0) {
+                                generate_thumbnail(files[i].name, files[i].icon_path);
+                            }
+                        } else {
+                            files[i].icon_path = get_file_logo(files[i].name, files[i].permissions, files[i].owner);
+                            files[i].is_thumbnail = false;
+                            files[i].cached_png_path = get_cached_png_path(files[i].icon_path);
+                        }
+                        
+                        files[i].cached_sixel_path = NULL;
+                        if (graphics_protocol == PROTOCOL_SIXEL && files[i].cached_png_path) {
+                            files[i].cached_sixel_path = get_cached_sixel_path(files[i].cached_png_path);
+                        }
+                    }
+                }
+                
+                if (files[i].is_emoji && graphics_protocol == PROTOCOL_SIXEL && files[i].cached_sixel_path) {
+                    struct stat sixel_st;
+                    if (stat(files[i].cached_sixel_path, &sixel_st) != 0) {
+                        cache_sixel(files[i].cached_png_path, files[i].cached_sixel_path);
+                    }
+                }
+            }
+            if (!files[i].is_emoji) {
+            } else {
+                continue;
+            }
+        }
+        
         if (!files[i].icon_path) continue;
         
         if (files[i].is_thumbnail) {
@@ -377,6 +559,7 @@ int main(int argc, char* argv[]) {
     
     init_cache_path();
     init_theme(DEFAULT_THEME);
+    init_lsd_config();
     
     int capacity = INITIAL_CAPACITY;
     FileEntry* files = malloc(capacity * sizeof(FileEntry));
@@ -416,8 +599,21 @@ int main(int argc, char* argv[]) {
             files[file_count].owner = st.st_uid;
             files[file_count].color = get_color_code(st.st_mode);
             files[file_count].cached_sixel_path = NULL;
+            files[file_count].is_emoji = false;
+            files[file_count].emoji_text = NULL;
             
-            if (is_image_file(entry->d_name)) {
+            const char* lsd_icon = get_lsd_icon(entry->d_name, st.st_mode);
+            if (lsd_icon) {
+                files[file_count].is_emoji = true;
+                files[file_count].emoji_text = lsd_icon;
+                files[file_count].icon_path = NULL;
+                files[file_count].cached_png_path = get_emoji_png_path(lsd_icon, files[file_count].color);
+                files[file_count].is_thumbnail = false;
+                
+                if (graphics_protocol == PROTOCOL_SIXEL && files[file_count].cached_png_path) {
+                    files[file_count].cached_sixel_path = get_cached_sixel_path(files[file_count].cached_png_path);
+                }
+            } else if (is_image_file(entry->d_name)) {
                 files[file_count].icon_path = get_thumbnail_path(entry->d_name);
                 files[file_count].is_thumbnail = true;
                 files[file_count].cached_png_path = strdup(files[file_count].icon_path);
@@ -469,16 +665,16 @@ int main(int argc, char* argv[]) {
                 }
                 
                 if (files[index].cached_png_path) {
-                    if (graphics_protocol == PROTOCOL_SIXEL) {
-                        if (files[index].cached_sixel_path) {
+                    struct stat png_st;
+                    if (stat(files[index].cached_png_path, &png_st) == 0 || 
+                        (!files[index].is_emoji && ensure_png_exists(files[index].icon_path, files[index].cached_png_path, files[index].is_thumbnail))) {
+                        
+                        if (graphics_protocol == PROTOCOL_SIXEL && files[index].cached_sixel_path) {
                             struct stat sixel_st;
                             if (stat(files[index].cached_sixel_path, &sixel_st) == 0) {
-                                draw_image(0, 0, 4, 2, files[index].cached_png_path, 
-                                         files[index].cached_sixel_path);
+                                draw_image(0, 0, 4, 2, files[index].cached_png_path, files[index].cached_sixel_path);
                             }
-                        }
-                    } else {
-                        if (ensure_png_exists(files[index].icon_path, files[index].cached_png_path, files[index].is_thumbnail)) {
+                        } else {
                             draw_image(0, 0, 4, 2, files[index].cached_png_path, NULL);
                         }
                     }
@@ -507,5 +703,6 @@ int main(int argc, char* argv[]) {
     }
     free(files);
     cleanup_theme();
+    cleanup_lsd_config();
     return 0;
 }

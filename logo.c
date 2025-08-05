@@ -1294,12 +1294,6 @@ char* get_file_logo(const char* filename, mode_t permissions, uid_t owner) {
     
     if (!filename) return NULL;
     
-    // Handle special custom icons
-    if (strcmp(filename, "lemon") == 0) return ICON_LEMON;
-    if (strcmp(filename, "sentiments") == 0) return ICON_SENTIMENTS;
-    if (strcmp(filename, "memory") == 0) return ICON_MEMORY;
-    if (strcmp(filename, "state") == 0) return ICON_STATE;
-    if (strcmp(filename, "test") == 0) return ICON_TEST;
     
     // Handle directories
     if (S_ISDIR(permissions)) {
